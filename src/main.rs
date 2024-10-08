@@ -1,29 +1,23 @@
+#![warn(missing_docs)]
+/// BookScan
 mod types;
 mod db;
+mod routes;
 
 use types::*;
-use std::thread::panicking;
-use juniper::{graphql_object, EmptyMutation, EmptySubscription, FieldResult, GraphQLEnum, GraphQLInputObject, GraphQLObject, RootNode, ScalarValue};
-use rocket::{get, launch, routes, State};
-use rocket::form::Strict;
-use rocket::form::validate::contains;
-use rocket::response::content::RawHtml;
-use sqlx::{Connection, Error, PgConnection, PgPool};
+use db::BsDb;
+use juniper::{graphql_object, EmptyMutation, EmptySubscription, FieldResult, GraphQLEnum, GraphQLInputObject, GraphQLObject, ScalarValue};
+use rocket::{routes};
+use sqlx::{Connection};
 use sqlx::postgres::PgPoolOptions;
-use crate::db::BsDb;
 
-struct Context {
-    db: BsDb,
-}
-impl juniper::Context for Context {}
 
 struct Query;
-
 
 #[graphql_object]
 #[graphql(context = Context)]
 impl Query {
-    fn api_version() -> &'static str {
+    async fn api_version() -> &'static str {
         "1.0"
     }
 
@@ -48,52 +42,28 @@ impl Query {
         }
     }
 }
-type Schema = RootNode<'static, Query, EmptyMutation<Context>, EmptySubscription<Context>>;
 
-#[rocket::get("/playground")]
-fn playground() -> RawHtml<String> {
-    juniper_rocket::playground_source("/graphql", None)
-}
 
-#[rocket::post("/graphql", data = "<request>")]
-async fn post_graphql(
-    db: &State<Context>,
-    request: juniper_rocket::GraphQLRequest,
-    schema: &State<Schema>,
-) -> juniper_rocket::GraphQLResponse {
-    request.execute(schema, db).await
-}
-
-#[rocket::get("/graphql?<request..>")]
-async fn get_graphql(
-    db: &State<Context>,
-    request: juniper_rocket::GraphQLRequest,
-    schema: &State<Schema>,
-) -> juniper_rocket::GraphQLResponse {
-    request.execute(schema, db).await
-}
-
-#[rocket::get("/graphiql")]
-fn graphiql() -> RawHtml<String> {
-    juniper_rocket::graphiql_source("/graphql", None)
-}
 
 /// Entrypoint
 #[rocket::main]
 async fn main()  {
-
-    let mut conn = match PgPoolOptions::new()
+    // Open a connection pool to the BookScan database
+    let conn = match PgPoolOptions::new()
         .max_connections(2)
         .connect("postgres://postgres:1234@localhost/postgres").await {
         Ok(c) => c,
         Err(_) => { !panic!() }
     };
+
+    // Create context for handling GraphQL requests
     let ctx = Context { db: BsDb::new(conn) };
 
+    // Start Rocket webserver
     _ = rocket::build()
         .manage(ctx)
         .manage(Schema::new(Query, EmptyMutation::<Context>::new(), EmptySubscription::<Context>::new()))
-        .mount("/", routes![graphiql, playground, get_graphql, post_graphql])
+        .mount("/", routes![routes::graphql::graphiql, routes::graphql::playground, routes::graphql::get_graphql, routes::graphql::post_graphql])
         .launch()
         .await
         .expect("failed to launch rocket");

@@ -1,9 +1,10 @@
 use core::convert::TryFrom;
-use juniper::{GraphQLEnum, GraphQLObject, GraphQLScalar};
+use juniper::{EmptyMutation, EmptySubscription, GraphQLEnum, GraphQLObject, GraphQLScalar, RootNode};
+use rocket::yansi::Paint;
+use crate::db::BsDb;
+use crate::Query;
 
-
-
-#[derive(sqlx::Type, Debug, GraphQLEnum)]
+#[derive(sqlx::Type, Debug, GraphQLEnum, Clone, Copy)]
 pub enum Subject {
     Math,
     German,
@@ -18,7 +19,7 @@ pub struct Book {
     pub subject: Subject,
 }
 
-#[derive(sqlx::FromRow, GraphQLObject)]
+#[derive(sqlx::FromRow, GraphQLObject, Clone, Debug)]
 pub struct Student {
     pub id: i32,
     pub first_name: String,
@@ -29,7 +30,12 @@ pub struct ExpandedBook {
     id: i32,
     name: String,
     subject: Subject,
-    owner: Student,
+    owner: Option<Student>,
+}
+impl ExpandedBook {
+    pub fn new(book: &Book, student: Option<Student>) -> Self {
+        Self { id: book.id, name: book.name.clone(), subject: book.subject.clone(), owner: student}
+    }
 }
 #[derive(GraphQLObject)]
 pub struct ExpandedStudent {
@@ -43,3 +49,11 @@ impl ExpandedStudent {
         Self { id: student.id, first_name: student.first_name.clone(), last_name: student.last_name.clone(), books }
     }
 }
+
+/// Context struct for GraphQL
+pub struct Context {
+    pub db: BsDb,
+}
+impl juniper::Context for Context {}
+
+pub type Schema = RootNode<'static, Query, EmptyMutation<Context>, EmptySubscription<Context>>;

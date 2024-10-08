@@ -4,17 +4,20 @@ use rocket::futures::TryFutureExt;
 use rocket::sentinel::resolution::Resolve;
 use sqlx::{Error, PgPool};
 use sqlx::postgres::PgStatement;
-use crate::types::{Book, ExpandedStudent, Student};
+use crate::types::{Book, ExpandedBook, ExpandedStudent, Student};
 
 pub struct BsDb {
     db: PgPool,
     //stmt_student_id: PgStatement<'a>,
 }
+
+/// Interacts with BookScan database
 impl BsDb {
 
     pub fn new(db: PgPool) -> Self {
         Self { db }
     }
+    /// Queries for a student
     pub fn get_student_id(&self, id: i32) -> impl Future<Output=Result<Option<Student>, Error>> + '_ {
         sqlx::query_as::<_, Student>("SELECT * FROM students WHERE id = $1 LIMIT 1")
             .bind(id)
@@ -31,6 +34,32 @@ impl BsDb {
         sqlx::query_as::<_, Book>("SELECT Books.* FROM Books JOIN StudentsBooks ON Books.id = StudentsBooks.book_id JOIN Students ON Students.id = StudentsBooks.student_id WHERE Students.id = $1;")
             .bind(student.id)
             .fetch_all(&self.db)
+    }
+
+     pub fn get_book_id(&self, id: i32) -> impl Future<Output=Result<Option<Book>, Error>> + '_ {
+         sqlx::query_as::<_, Book>("SELECT * FROM books WHERE id = $1 LIMIT 1")
+             .bind(id)
+             .fetch_optional(&self.db)
+     }
+
+    pub fn get_book_owner<'a>(&'a self, book: &'a Book)  -> impl Future<Output=Result<Option<Student>, Error>> + 'a  {
+        sqlx::query_as::<_, Student>(
+        "SELECT Students.*
+            FROM Students
+            JOIN StudentsBooks ON Students.id = StudentsBooks.student_id
+            JOIN Books ON Books.id = StudentsBooks.book_id
+            WHERE Books.id = $1;
+            ")
+            .bind(book.id)
+            .fetch_optional(&self.db)
+    }
+    pub async fn get_expanded_book(&self, book: &Book) -> Result<ExpandedBook, Error> {
+        let owner = self.get_book_owner(book).await?;
+        if owner.is_none() {
+            Ok(ExpandedBook::new(book, None))
+        } else {
+            Ok(ExpandedBook::new(book, owner))
+        }
     }
 
     pub async fn get_expanded_student(&self, student: &Student) -> Result<ExpandedStudent, Error> {
